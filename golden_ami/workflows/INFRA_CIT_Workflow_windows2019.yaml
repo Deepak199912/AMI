@@ -1,0 +1,101 @@
+---
+name: INFRA_CIT-Workflow-windows
+on:
+  push:
+    branches:
+      - 'feature/*'
+      - 'main'
+      - 'bugfix/*'
+  schedule:
+    - cron: "0 12 * * 0" # Every Sunday at 12:00 AM UTC
+ 
+
+jobs:
+  infra_cit_work_flow_windows:
+    runs-on: ubuntu-infra
+    name: infra_cit_work_flow_windows
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        ansible_ver: [3.2.0]
+        k8s_version: ["1.25", "1.26", "1.27", "1.28"]
+
+    steps:
+      # Get Branch Name
+      - name: Get Env BRANCH
+        run: echo "BRANCH=$(echo $GITHUB_REF | cut -d'/' -f 3)" >> $GITHUB_ENV
+
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+        with:
+          path: main
+
+      # Set AMI Version environment variable
+      - name : Set AMI Version
+        run: |
+          if [[ $BRANCH == 'develop' ]]; then
+            echo "ami_version=$(cat main/packer_windows2019/packer.pkr.hcl | jq '.variables.input_ami_version' | tr -d '"')"  >> $GITHUB_ENV
+            echo force_deregister="false"  >> $GITHUB_ENV
+            echo force_delete_snapshot="false"  >> $GITHUB_ENV
+            echo account_ids="446102611596" >> $GITHUB_ENV
+          else
+            echo "ami_version=${{ matrix.k8s_version }}" >> $GITHUB_ENV
+            echo force_deregister="false" >> $GITHUB_ENV
+            echo force_delete_snapshot="false" >> $GITHUB_ENV
+            echo account_ids="446102611596" >> $GITHUB_ENV
+            
+          fi
+      # Checkout CIS Windows Ansible Repo
+      - name: Checkout CIS Windows Ansible Repo
+        uses: actions/checkout@v3
+        with:
+          repository: VVSuite-Dev/CIS-Windows-Ansible
+          path: CIS-Windows-Ansible
+          ref: 'v1.0.0'
+          token: ${{ secrets.GH_TOKEN }}
+          
+
+      # Init templates
+      - name: Init Template
+        uses: ./main/.github/actions/tools
+        with:
+          command: init
+          target: main/packer_windows2019/packer.pkr.hcl
+
+      # Validate templates
+      - name: Validate Template
+        uses: ./main/.github/actions/tools
+        with:
+          command: validate
+          arguments: -syntax-only
+          target: main/packer_windows2019/packer.pkr.hcl
+
+      # Build artifact
+      - name: Build Artifact
+        uses: ./main/.github/actions/tools
+        with:
+          command: build
+          arguments: "-color=false -on-error=cleanup"
+          target: main/packer_windows2019/packer.pkr.hcl
+        env:
+          AWS_POLL_DELAY_SECONDS: '40'
+          AWS_MAX_ATTEMPTS: '350'
+          PACKER_LOG: 1
+          cert_patches_bucket: "patch-management-bucket-amrhx37zwl2jwcqf"
+          assessment_template_arn: "arn:aws:inspector:eu-central-1:446102611596:target/0-OfTX9sIa/template/0-k927Y67e"
+          inspector_report_bucket: "scan-report-bucket-amrhx37zwl2jwcqf"
+          inspector_report_bucket_key: "inspectorscan_worker_windows"
+          s3_encryption: "aws:kms"
+          kms_key_id: "9299c76a-d4ab-498b-9195-349ef66bdf5c"
+          aws_ecr_account_id: "446102611596"
+          installers_bucket: "installers-bucket-amrhx37zwl2jwcqf"
+          exporter_key: "windows_exporter"
+          exporter_version: "0.22.0"
+          promtail_version: "2.8.2"
+          promtail_bucket_key: "promtail"
+          vpc_id: "vpc-0806d67c913af3be8"
+          subnet_id: "subnet-027eee9c056ecd593"
+          security_group_id: "sg-08ca5773e49dd6611"
+          
