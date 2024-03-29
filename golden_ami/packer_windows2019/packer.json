@@ -1,0 +1,186 @@
+{
+  "variables": {
+    "ami_prefix": "CIS_WindowsServer_2019_EKS_Optimized_1.25",
+    "ami_version": "{{ env `ami_version` }}",
+    "disable_stop_instance": "false",
+    "force_deregister": "{{ env `force_deregister` }}",
+    "force_delete_snapshot": "{{ env `force_delete_snapshot` }}",
+    "kms_key_id": "{{ env `kms_key_id` }}",
+    "vpc_id": "{{ env `vpc_id` }}",
+    "subnet_id": "{{env `subnet_id`}}",
+    "security_group_id": "{{env `security_group_id`}}",
+    "aws_ecr_account_id": "{{ env `aws_ecr_account_id` }}",
+    "root_volume_size": "100",
+    "base_ami_filter": "Windows_Server-2019-English-Core-EKS_Optimized-1.25*",
+    "base_ami_owner": "999352223265",
+    "ansible_winrm_server_cert_validation": "ignore",
+    "region": "eu-central-1",
+    "cert_patches_bucket": "{{ env `cert_patches_bucket` }}",
+    "assessment_template_arn": "{{ env `assessment_template_arn` }}",
+    "inspector_report_bucket": "{{ env `inspector_report_bucket` }}",
+    "inspector_report_bucket_key": "{{ env `inspector_report_bucket_key` }}",
+    "s3_encryption": "{{ env `s3_encryption` }}",
+    "install_mps": "true",
+    "installers_bucket": "{{ env `installers_bucket` }}",
+    "exporter_key": "{{ env `exporter_key` }}",
+    "exporter_version": "{{ env `exporter_version` }}",
+    "promtail_bucket_key": "{{ env `promtail_bucket_key` }}",
+    "promtail_version": "{{ env `promtail_version` }}",
+    "account_ids": "{{ env `account_ids` }}",
+    "input_ami_version": "5.1.0"
+  },
+  "builders": [
+    {
+      "type": "amazon-ebs",
+      "communicator": "winrm",
+      "associate_public_ip_address": true,
+      "disable_stop_instance": "{{user `disable_stop_instance`}}",
+      "encrypt_boot": true,
+      "user_data_file": "main/AWS_EC2_WinRM_Setup.ps1",
+      "winrm_use_ntlm": true,
+      "winrm_timeout": "15m",
+      "winrm_insecure": true,
+      "winrm_use_ssl": true,
+      "region": "{{user `region`}}",
+      "instance_type": "t3.2xlarge",
+      "iam_instance_profile": "Packer_AMI_Creation_Permissions_Role",
+      "vpc_id": "{{user `vpc_id`}}",
+      "subnet_id": "{{user `subnet_id`}}",
+      "security_group_id": "{{user `security_group_id`}}",
+      "winrm_username": "Administrator",
+      "force_delete_snapshot": "{{user `force_delete_snapshot`}}",
+      "force_deregister": "{{user `force_deregister`}}",
+      "kms_key_id": "{{user `kms_key_id`}}",
+      "ami_name": "{{user `ami_prefix`}}_{{user `ami_version`}}",
+      "ami_users": "{{user `account_ids`}}",
+      "launch_block_device_mappings": [
+        {
+          "delete_on_termination": true,
+          "device_name": "/dev/sda1",
+          "encrypted": true,
+          "volume_size": "{{user `root_volume_size`}}",
+          "volume_type": "gp3"
+        }
+      ],
+      "fast_launch": {
+        "enable_fast_launch": true,
+        "template_name": "ec2FastLaunch",
+        "max_parallel_launches": 7
+      },
+      "run_tags": {
+        "Name": "Packer Build",
+        "Purpose": "Packer Build"
+      },
+      "tags": {
+        "Name": "{{user `ami_prefix`}}_{{user `ami_version`}}",
+        "OS_Version": "WindowsServer2019",
+        "Release": "{{user `ami_version`}}",
+        "Purpose": "EKS Windows Nodes",
+        "Base_AMI_Name": "{{ .SourceAMIName }}",
+        "Build_Date": "{{isotime \"2006-01-02\"}}",
+        "Build_Time": "{{isotime \"3:04PM\"}}",
+        "Build_At": "{{isotime}}",
+        "Hardened": "yes",
+        "Hardening_Benchmark": "CIS Level 1",
+        "RB:ECS:Tenant": "shared",
+        "RB:ECS:CostCenter": "537301"
+      },
+      "source_ami_filter": {
+        "filters": {
+          "name": "{{user `base_ami_filter`}}"
+        },
+        "most_recent": true,
+        "owners": [
+          "{{user `base_ami_owner`}}"
+        ]
+      }
+    }
+  ],
+  "provisioners": [
+    {
+      "scripts": [
+        "main/AWS_EC2LaunchV1_Setup.ps1"
+      ],
+      "type": "powershell"
+    },
+    {
+      "scripts": [
+        "main/Tool_Choco_Packages.ps1"
+      ],
+      "type": "powershell"
+    },
+    
+    {
+      "pause_before": "10s",
+      "environment_vars": [
+        "CERTPatchesBucket={{user `cert_patches_bucket`}}"
+      ],
+      "scripts": [
+        "main/Bosch_Cert_Advisory_Patching.ps1"
+      ],
+      "type": "powershell"
+    },
+    {
+      "pause_before": "30s",
+      "environment_vars": [
+        "INSTALLERS_BUCKET={{user `installers_bucket`}}",
+        "EXPORTER_BUCKET_KEY={{user `exporter_key`}}",
+        "EXPORTER_VERSION={{ user `exporter_version` }}",
+        "REGION={{ user `region`}}"
+      ],
+      "scripts": [
+        "main/Tool_Windows_Exporter.ps1"
+      ],
+      "type": "powershell"
+    },
+
+    {
+      "pause_before": "30s",
+      "environment_vars": [
+        "INSTALLERS_BUCKET={{user `installers_bucket`}}",
+        "PROMTAIL_BUCKET_KEY={{user `promtail_bucket_key`}}",
+        "PROMTAIL_VERSION={{ user `promtail_version` }}",
+        "REGION={{ user `region`}}"
+      ],
+      "scripts": [
+        "main/Tool_Promtail.ps1"
+      ],
+      "type": "powershell"
+    },
+    {
+      "environment_vars": [
+        "Install_MPS={{user `install_mps`}}"
+      ],
+      "scripts": [
+        "main/Tool_TrendMicro_Agent.ps1"
+      ],
+      "type": "powershell"
+    },
+    {
+      "restart_check_command": "powershell -command \"&amp; {Write-Output 'Machine restarted.'}\"",
+      "restart_timeout": "10m",
+      "type": "windows-restart"
+    },
+    {
+      "pause_before": "30s",
+      "destination": "C:/Temp/",
+      "source": "main/Tests_Installed_Tools.ps1",
+      "type": "file",
+      "max_retries": 3
+    },
+    {
+      "pause_before": "30s",
+      "type": "powershell",
+      "inline": [
+        "C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Scripts\\InitializeInstance.ps1 -Schedule",
+        "C:\\ProgramData\\Amazon\\EC2-Windows\\Launch\\Scripts\\SysprepInstance.ps1 -NoShutdown"
+      ]
+    }
+  ],
+  "post-processors": [
+    {
+      "type": "manifest",
+      "output": "main/manifest.json"
+    }
+  ]
+}
